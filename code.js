@@ -1,5 +1,6 @@
+'use strict';
 
-var running = 2;
+var running = 4;
 
 function Vec(x, y) {
   this.x = x;
@@ -20,7 +21,7 @@ function Vec(x, y) {
     return this.x * vec.x + this.y * vec.y;
   }
   this.ortho = function() {
-    return new Vec(this.y, -this.x);
+    return new Vec(-this.y, this.x);
   }
   this.normalize = function() {
     let len = this.length();
@@ -32,41 +33,115 @@ function Ball(size, path) {
   this.size = size;
   this.path = path;
   this.type = 'ball';
+  this.color = 'black';
+
   this.paint = function(ctx, t) {
     let pos = this.path.getPosition(t);
+    ctx.save();
+    ctx.fillStyle = this.color;
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, this.size, 0, Math.PI * 2, true);
     ctx.closePath();
     ctx.fill();
-/*
+    ctx.restore();
+
     let begin = this.path.origin;
     let end = this.path.getEndPosition();
+
+    ctx.save();
     ctx.beginPath();
-    ctx.setLineDash([5]);
+    ctx.arc(begin.x, begin.y, this.size, 0, Math.PI * 2, true);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(end.x, end.y, this.size, 0, Math.PI * 2, true);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.setLineDash([10]);
+    ctx.beginPath();
     ctx.moveTo(begin.x, begin.y);
     ctx.lineTo(end.x, end.y);
     ctx.closePath();
     ctx.stroke();
-    */
+    ctx.restore();
   }
 
   this.update = function(t) {
     if (this.path.isMoving(t)) {
       return;
     }
-    let porig = this.path.getEndPosition();
-    let vel = this.path.velocity;
-    let n = this.path.intersect.obj.normal;
-    let pvel = vel.sub(
-      n.scale(vel.dot(n) * 2)
-    );
-    let tmin = intersectScene(porig, pvel, this);
-    let duration = (tmin[0] - this.size) / pvel.length();
-    let intersection = scene[tmin[1]];
-    let start = this.path.start + this.path.duration;
-    this.path = new Path(porig, pvel, start, duration, intersection);
+    console.log('update');
 
-//    running--;
+    let origin_new = this.path.getEndPosition();
+    let velocity_old = this.path.velocity;
+    let start = this.path.start + this.path.duration;
+
+    if (this.path.intersect.type == 'wall') {
+      let n = this.path.intersect.normal;
+      let velocity_new = velocity_old.sub(
+        n.scale(velocity_old.dot(n) * 2)
+      );
+      origin_new = origin_new.add(velocity_new.scale(1e-2));
+      let tmin = intersectScene(origin_new, velocity_new, this);
+      let duration = (tmin[0]) / velocity_new.length();
+      let intersection = scene[tmin[1]];
+      this.path = new Path(origin_new, velocity_new,
+        start, duration, intersection);
+    }
+    else if (this.path.intersect.type == 'ball' ) {
+      let that = this.path.intersect;
+      let ball2_pos = that.path.getPosition(start);
+
+      let un = ball2_pos.sub(origin_new).normalize();
+      let ut = un.ortho();
+      let v1 = velocity_old;
+      let v2 = that.path.velocity;
+      let m1 = this.size;
+      let m2 = that.size;
+
+      let v1n = un.dot(v1);
+      let v1t = ut.dot(v1);
+      let v2n = un.dot(v2);
+      let v2t = ut.dot(v2);
+
+
+      let v1tp = v1t;
+      let v2tp = v2t;
+
+      let v1np = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
+      let v2np = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
+
+      let v1p = un.scale(v1np).add(ut.scale(v1tp));
+      let v2p = un.scale(v2np).add(ut.scale(v2tp));
+
+      origin_new = origin_new.add(v1p.scale(1e-2));
+
+      let tmin = intersectScene(origin_new, v1p, this);
+      let duration = tmin[0] / v1p.length();
+      let intersection = scene[tmin[1]];
+      this.path = new Path(origin_new, v1p,
+        start, duration, intersection);
+
+      console.log('this.path', this.path);
+
+      ball2_pos = ball2_pos.add(v2p.scale(1e-2));
+
+      tmin = intersectScene(ball2_pos, v2p, that);
+      duration = tmin[0] / v2p.length();
+      intersection = scene[tmin[1]];
+      that.path = new Path(ball2_pos, v2p,
+        start, duration, intersection);
+
+      console.log('that.path', that.path);
+      console.log('start', start);
+      console.log('t', t);
+      console.log('this moving', this.path.isMoving(t));
+      console.log('that moving', that.path.isMoving(t));
+    }
+
+    running--;
   }
 }
 
@@ -149,22 +224,25 @@ var scene = [];
 var state = {};
 
 
-function intersectWall(origin, direction, wall) {
+function intersectWall(origin, direction, ball, wall) {
   let denom = wall.normal.dot(direction);
   if (Math.abs(denom) > 1e-6) {
     let p0l0 = wall.origin.sub(origin);
     let t = p0l0.dot(wall.normal) / denom;
-    return t;
+    return t + (ball.size / denom);
   }
   return -1;
 }
 
-function intersectBall(ball1, ball2) {
+function intersectBall(origin, velocity, ball1, ball2) {
+//  running--;
   let l = ball1.size + ball2.size;
-  let pq = ball1.path.origin.sub(ball2.path.origin);
-  let rs = ball1.path.velocity.sub(ball2.path.velocity);
-
+  let pq = origin.sub(ball2.path.origin);
+  let rs = velocity.sub(ball2.path.velocity);
   let a = rs.dot(rs);
+  if (a < 1e-6 && a > -1e-6) {
+    return -1;
+  }
   let b = 2 * rs.dot(pq);
   let c = pq.dot(pq) - l*l;
 
@@ -174,12 +252,11 @@ function intersectBall(ball1, ball2) {
   }
 
   if (square < 1e-6) {
-    return -b / (2*a);
+    return (-b / (2*a)) * velocity.length();
   }
-
   let sqr = Math.sqrt(square);
-  let t1 = (-b + sqr) / (2 * a);
-  let t2 = (-b - sqr) / (2 * a);
+  let t1 = (-b + sqr) / (2 * a) * velocity.length();
+  let t2 = (-b - sqr) / (2 * a) * velocity.length();
 
   let tmin = Math.min(t1, t2);
   let tmax = Math.max(t1, t2);
@@ -197,7 +274,17 @@ function intersectScene(origin, velocity, obj) {
     if (idx == obj.index) {
       return -1;
     }
-    return intersectWall(origin, dir, el.obj);
+    if (el.type == 'wall') {
+      return intersectWall(origin, dir, obj, el);
+    }
+    else if (el.type == 'ball') {
+      let t =  intersectBall(origin, velocity, obj, el);
+      return t;
+    }
+    else {
+      console.error('unknown type');
+    }
+
   });
   let tmin = ts.reduce(function(acc, el, idx) {
     if ((el > 0) && (el < acc[0])) {
@@ -215,11 +302,12 @@ function getTime() {
 function draw() {
   let now = getTime();
   state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
-  scene.filter(o => o.visible)
-    .forEach(e => e.obj.paint(state.ctx, now));
-  scene.forEach(e => e.obj.update(now));
+  scene.forEach(e => e.paint(state.ctx, now));
+  scene.forEach(e => e.update(now));
 
-  window.requestAnimationFrame(draw);
+  if (running > 0) {
+    window.requestAnimationFrame(draw);
+  }
 }
 
 function onInit() {
@@ -228,38 +316,39 @@ function onInit() {
   state.canvas = document.getElementById('canvas');
   state.ctx = canvas.getContext('2d');
 
-  scene.push({
-    obj: new Wall(new Vec(0, 0), new Vec(1, 0)),
-    visible: true
-  });
-  scene.push({
-    obj: new Wall(new Vec(0, 0), new Vec(0, 1)),
-    visible: true
-  });
-  scene.push({
-    obj: new Wall(new Vec(state.canvas.width, state.canvas.height), new Vec(0, -1)),
-    visible: true
-  });
-  scene.push({
-    obj: new Wall(new Vec(state.canvas.width, state.canvas.height), new Vec(-1, 0)),
-    visible: true
-  });
+  scene.push(new Wall(new Vec(0, 0), new Vec(1, 0)));
+  scene.push(new Wall(new Vec(0, 0), new Vec(0, 1)));
+  scene.push(new Wall(new Vec(state.canvas.width, state.canvas.height), new Vec(0, -1)));
+  scene.push(new Wall(new Vec(state.canvas.width, state.canvas.height), new Vec(-1, 0)));
 
-  let radius = 10;
-  let ball = new Ball(radius, null);
-  scene.push({
-    obj: ball,
-    visible: true
-  });
+  let radiusa = 10;
+  let balla = new Ball(radiusa, null);
+  balla.color = 'red';
+  scene.push(balla);
 
-  scene.forEach((e, i) => e.obj.index = i);
+  scene.forEach((e, i) => e.index = i);
 
-  let origin = new Vec(50, 50);
-  let velocity = new Vec(20, 40);
-  let tmin = intersectScene(origin, velocity, ball);
-  let duration = (tmin[0] - radius) / velocity.length();
-  let intersection = scene[tmin[1]];
-  ball.path = new Path(origin, velocity, now, duration, intersection);
+  let origina = new Vec(50, 100);
+  let velocitya = new Vec(10, 0);
+  let tmina = intersectScene(origina, velocitya, balla);
+  let durationa = tmina[0] / velocitya.length();
+  let intersectiona = scene[tmina[1]];
+  balla.path = new Path(origina, velocitya,
+    now, durationa, intersectiona);
+
+  let radiusb = 10;
+  let ballb = new Ball(radiusb, null);
+  ballb.color = 'blue';
+  scene.push(ballb);
+
+  scene.forEach((e, i) => e.index = i);
+  let originb = new Vec(250, 110);
+  let velocityb = new Vec(-10, 0);
+  let tminb = intersectScene(originb, velocityb, ballb);
+  let durationb = tminb[0] / velocityb.length();
+  let intersectionb = scene[tminb[1]];
+  ballb.path = new Path(originb, velocityb,
+    now, durationb, intersectionb);
 
   window.requestAnimationFrame(draw);
 }
