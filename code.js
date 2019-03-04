@@ -1,6 +1,7 @@
 'use strict';
 
 var running = 4;
+var epsilon = 1e-2;
 
 function Vec(x, y) {
   this.x = x;
@@ -83,15 +84,13 @@ function Ball(size, path) {
       let velocity_new = velocity_old.sub(
         n.scale(velocity_old.dot(n) * 2)
       );
-      origin_new = origin_new.add(velocity_new.scale(1e-2));
-      let tmin = intersectScene(origin_new, velocity_new, this);
-      let duration = (tmin[0]) / velocity_new.length();
-      let intersection = scene[tmin[1]];
-      this.path = new Path(origin_new, velocity_new,
-        start, duration, intersection);
+      origin_new = origin_new.add(velocity_new.scale(epsilon));
+      intersectScene(origin_new, velocity_new, this, start);
     }
     else if (this.path.intersect.type == 'ball' ) {
       let that = this.path.intersect;
+      console.log('this moving', this.path.isMoving(t));
+      console.log('that moving', that.path.isMoving(t));
       let ball2_pos = that.path.getPosition(start);
 
       let un = ball2_pos.sub(origin_new).normalize();
@@ -116,27 +115,17 @@ function Ball(size, path) {
       let v1p = un.scale(v1np).add(ut.scale(v1tp));
       let v2p = un.scale(v2np).add(ut.scale(v2tp));
 
-      origin_new = origin_new.add(v1p.scale(1e-2));
+      origin_new = origin_new.add(v1p.scale(epsilon));
 
-      let tmin = intersectScene(origin_new, v1p, this);
-      let duration = tmin[0] / v1p.length();
-      let intersection = scene[tmin[1]];
-      this.path = new Path(origin_new, v1p,
-        start, duration, intersection);
+      intersectScene(origin_new, v1p, this, start);
 
-      console.log('this.path', this.path);
+      console.log('this.path', this.index, this.path);
 
-      ball2_pos = ball2_pos.add(v2p.scale(1e-2));
+      ball2_pos = ball2_pos.add(v2p.scale(epsilon));
 
-      tmin = intersectScene(ball2_pos, v2p, that);
-      duration = tmin[0] / v2p.length();
-      intersection = scene[tmin[1]];
-      that.path = new Path(ball2_pos, v2p,
-        start, duration, intersection);
+      intersectScene(ball2_pos, v2p, that, start);
 
-      console.log('that.path', that.path);
-      console.log('start', start);
-      console.log('t', t);
+      console.log('that.path', that.index, that.path);
       console.log('this moving', this.path.isMoving(t));
       console.log('that moving', that.path.isMoving(t));
     }
@@ -162,7 +151,7 @@ function Path(origin, velocity, start, duration, intersection) {
   }
 
   this.isMoving = function(t) {
-    return ((t - this.start) < this.duration);
+    return (t < (this.duration + this.start));
   }
 }
 
@@ -268,7 +257,7 @@ function intersectBall(origin, velocity, ball1, ball2) {
   }
 }
 
-function intersectScene(origin, velocity, obj) {
+function intersectScene(origin, velocity, obj, start) {
   let dir = velocity.normalize();
   let ts = scene.map(function(el, idx) {
     if (idx == obj.index) {
@@ -292,7 +281,18 @@ function intersectScene(origin, velocity, obj) {
     }
     return acc;
   }, [Infinity, -1]);
-  return tmin;
+  console.log('tmin', tmin);
+  let duration = tmin[0] / velocity.length();
+  let intersection = scene[tmin[1]];
+  obj.path = new Path(origin, velocity,
+    start, duration, intersection);
+
+//  return;
+  if (intersection.type == 'ball') {
+//    console.log(intersection);
+//    let other_duration = (start + duration) - intersection.path.start;
+//    intersection.path.duration = other_duration;
+  }
 }
 
 function getTime() {
@@ -302,11 +302,13 @@ function getTime() {
 function draw() {
   let now = getTime();
   state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
-  scene.forEach(e => e.paint(state.ctx, now));
   scene.forEach(e => e.update(now));
+  scene.forEach(e => e.paint(state.ctx, now));
 
   if (running > 0) {
     window.requestAnimationFrame(draw);
+  } else {
+    console.log('running', running);
   }
 }
 
@@ -328,13 +330,9 @@ function onInit() {
 
   scene.forEach((e, i) => e.index = i);
 
-  let origina = new Vec(50, 100);
+  let origina = new Vec(50, 150);
   let velocitya = new Vec(10, 0);
-  let tmina = intersectScene(origina, velocitya, balla);
-  let durationa = tmina[0] / velocitya.length();
-  let intersectiona = scene[tmina[1]];
-  balla.path = new Path(origina, velocitya,
-    now, durationa, intersectiona);
+  let tmina = intersectScene(origina, velocitya, balla, now);
 
   let radiusb = 10;
   let ballb = new Ball(radiusb, null);
@@ -342,13 +340,9 @@ function onInit() {
   scene.push(ballb);
 
   scene.forEach((e, i) => e.index = i);
-  let originb = new Vec(250, 110);
-  let velocityb = new Vec(-10, 0);
-  let tminb = intersectScene(originb, velocityb, ballb);
-  let durationb = tminb[0] / velocityb.length();
-  let intersectionb = scene[tminb[1]];
-  ballb.path = new Path(originb, velocityb,
-    now, durationb, intersectionb);
+  let originb = new Vec(150, 50);
+  let velocityb = new Vec(0, 10);
+  let tminb = intersectScene(originb, velocityb, ballb, now);
 
   window.requestAnimationFrame(draw);
 }
